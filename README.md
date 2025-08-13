@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="assets/logo.jpg?v=INIT" alt="Company logo" height="150">
+  <img src="assets/logo.svg?v=INIT" alt="Company logo" height="72">
 </p>
 
 # Capital Commitment Tracker
 
-**Campaign:** Quansight Initiate Fund III, L.P.  
+**Campaign:** Venture Capital Fund III, L.P.  
 **Goal:** $10,000,000 USD
 <br>
 ![Capital Commitments Thermometers](./thermometer.svg?v=20250811154832-16885081679-1)
@@ -39,12 +39,12 @@ Add this html to README.md so the logo and chart display on the repo homepage:
 
 ```
 <p align="center">
-  <img src="assets/logo.jpg?v=INIT" alt="Company logo" height="150">
+  <img src="assets/logo.svg?v=INIT" alt="Company logo" height="72">
 </p>
 
 # Capital Commitment Tracker
 
-**Campaign:** Quansight Initiate Fund III, L.P.  
+**Campaign:** Venture Capital Fund III, L.P.  
 **Goal:** $10,000,000 USD
 <br>
 ![Capital Commitments Thermometers](./thermometer.svg?v=20250811154832-16885081679-1)
