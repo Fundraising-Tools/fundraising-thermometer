@@ -12,7 +12,7 @@
         </style></defs>
 <rect x="0" y="0" width="1240" height="480" fill="#ffffff"/>
 <text x="620.0" y="48" class="title" text-anchor="middle">Venture Capital Fund III, L.P. — Capital Commitments</text>
-<text x="620.0" y="76" class="value" text-anchor="middle">$2,750,000 / $10,000,000 (28%)</text>
+<text x="620.0" y="76" class="value" text-anchor="middle">$3,000,000 / $10,000,000 (30%)</text>
 <text x="165.0" y="113" class="topLbl" text-anchor="middle">$1M</text>
 <rect x="139" y="129" rx="12" ry="12" width="52" height="259" class="tube"/>
 <clipPath id="clipFill0"><rect x="139" y="129" width="52" height="259" rx="12" ry="12"/></clipPath>
@@ -71,7 +71,7 @@
 <text x="257.0" y="458.39000000000004" class="segLbl" text-anchor="middle">$1,000,000</text>
 <text x="349.0" y="113" class="topLbl" text-anchor="middle">$3M</text>
 <rect x="323" y="129" rx="12" ry="12" width="52" height="259" class="tube"/>
-<clipPath id="clipFill2"><rect x="323" y="194" width="52" height="194" rx="12" ry="12"/></clipPath>
+<clipPath id="clipFill2"><rect x="323" y="129" width="52" height="259" rx="12" ry="12"/></clipPath>
 <rect x="323" y="129" rx="12" ry="12" width="52" height="259" fill="#e02020" clip-path="url(#clipFill2)"/>
 <circle cx="349.0" cy="406.59000000000003" r="32.800000000000004" style="fill:#e02020"/>
 <circle cx="349.0" cy="406.59000000000003" r="33.800000000000004" fill="none" stroke="#ccc" stroke-width="1"/>
@@ -96,7 +96,7 @@
 <line x1="375" y1="194" x2="380" y2="194" class="tickMinor" stroke-width="1"/>
 <line x1="375" y1="168" x2="380" y2="168" class="tickMinor" stroke-width="1"/>
 <line x1="375" y1="142" x2="380" y2="142" class="tickMinor" stroke-width="1"/>
-<text x="349.0" y="458.39000000000004" class="segLbl" text-anchor="middle">$750,000</text>
+<text x="349.0" y="458.39000000000004" class="segLbl" text-anchor="middle">$1,000,000</text>
 <text x="441.0" y="113" class="topLbl" text-anchor="middle">$4M</text>
 <rect x="415" y="129" rx="12" ry="12" width="52" height="259" class="tube"/>
 <clipPath id="clipFill3"><rect x="415" y="388" width="52" height="0" rx="12" ry="12"/></clipPath>
