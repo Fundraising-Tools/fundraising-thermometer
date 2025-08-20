@@ -1,0 +1,29 @@
+name: LinkedIn Post — Test Harness
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Post text"
+        required: false
+        default: ""
+      link_url:
+        description: "Optional link URL"
+        required: false
+        default: ""
+      image_url:
+        description: "Optional image URL"
+        required: false
+        default: ""
+      use_group_mode:
+        description: "true = Group mode (Posts API); false = Public UGC"
+        required: false
+        default: "false"
+
+jobs:
+  post:
+    # Skip when ignore.txt exists
+    if: ${{ hashFiles('.github/workflows/ignore.txt') == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Harness runs manually; respects ignore.txt toggle."

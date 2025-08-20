@@ -1,0 +1,76 @@
+name: LinkedIn Group Mode Toggle
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+jobs:
+  toggle:
+    if: ${{ github.event.issue.pull_request && (startsWith(github.event.comment.body, '/group-on') || startsWith(github.event.comment.body, '/group-off')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check commenter permission
+        id: auth
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const role = context.payload.comment.author_association;
+            const ok = ['OWNER','MEMBER','COLLABORATOR'].includes(role);
+            if (!ok) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.payload.issue.number, body: `⛔ You are \`${role}\`. Only repository maintainers may toggle group mode.` });
+              core.setFailed('Not authorized');
+            } else {
+              core.setOutput('authorized', 'true');
+            }
+
+      - name: Checkout
+        if: steps.auth.outputs.authorized == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Apply toggle
+        if: steps.auth.outputs.authorized == 'true'
+        env:
+          CMD: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          MARKER=".github/workflows/GROUP_MODE"
+          if echo "$CMD" | grep -Eiq '^/group-on\b'; then
+            mkdir -p .github/workflows
+            echo "# group mode enabled" > "$MARKER"
+            CHANGED=1
+          elif echo "$CMD" | grep -Eiq '^/group-off\b'; then
+            if [ -f "$MARKER" ]; then
+              rm -f "$MARKER"
+              CHANGED=1
+            else
+              CHANGED=0
+            fi
+          else
+            CHANGED=0
+          fi
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          if [ "$CHANGED" -eq 1 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: toggle GROUP_MODE marker"
+            git push
+          fi
+
+      - name: Comment result
+        if: steps.auth.outputs.authorized == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const exists = fs.existsSync('.github/workflows/GROUP_MODE');
+            const status = exists ? 'ON' : 'OFF';
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.payload.issue.number, body: `ℹ️ Group mode is now **${status}**.` });

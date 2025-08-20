@@ -1,0 +1,251 @@
+name: LinkedIn publish (group-ready, template-aware)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  actions: read
+
+jobs:
+  gate:
+    if: ${{ hashFiles('.github/workflows/ignore.txt') == '' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '/publish') || startsWith(github.event.comment.body, '/dry-run') || startsWith(github.event.comment.body, '/cancel')) }}
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      repo_full: ${{ steps.pr.outputs.repo_full }}
+      base: ${{ steps.pr.outputs.base }}
+      merged: ${{ steps.pr.outputs.merged }}
+      command: ${{ steps.pr.outputs.command }}
+      message: ${{ steps.msg.outputs.message }}
+      link_url: ${{ steps.args.outputs.link_url }}
+      link_title: ${{ steps.args.outputs.link_title }}
+      image_url: ${{ steps.args.outputs.image_url }}
+      text_override: ${{ steps.args.outputs.text }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Load PR data and check author association
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+            const comment = context.payload.comment;
+            const association = comment.author_association;
+            const allowed = ['OWNER','MEMBER','COLLABORATOR'].includes(association);
+            if (!allowed) {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body: `⛔ Not permitted. Your role is \`${association}\`.` });
+              core.setFailed(`Unauthorized commenter: ${association}`); return;
+            }
+            const pr = (await github.rest.pulls.get({ owner, repo, pull_number: issue_number })).data;
+            core.setOutput('command', comment.body.trim());
+            core.setOutput('merged', String(pr.merged));
+            core.setOutput('base', pr.base.ref);
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('pr_title', pr.title);
+            core.setOutput('pr_url', pr.html_url);
+            core.setOutput('repo_full', `${owner}/${repo}`);
+            core.setOutput('merged_by', pr.merged_by ? pr.merged_by.login : 'unknown');
+            core.setOutput('author', pr.user.login);
+            core.setOutput('repo_url', `https://github.com/${owner}/${repo}`);
+            core.setOutput('merge_sha', pr.merge_commit_sha || '');
+
+      - name: Stop if PR not merged (publish/cancel only)
+        if: steps.pr.outputs.merged != 'true' && (startsWith(steps.pr.outputs.command, '/publish') || startsWith(steps.pr.outputs.command, '/cancel'))
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({ ...context.repo, issue_number: context.payload.issue.number, body: "⛔ This PR isn’t merged. Nothing to publish or cancel." });
+            core.setFailed('PR not merged')
+
+      - name: Parse args (text/link/image) with validation
+        id: args
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.comment.body.trim();
+            const { owner, repo } = context.repo; const issue_number = context.payload.issue.number;
+            const m = body.match(/^\/(publish|dry-run)\b(.*)$/s); let tail = m ? m[2] : ''; let tokens = [];
+            tail.replace(/"([^"]*)"|'([^']*)'|(\S+)/g, (_, a,b,c)=>{tokens.push(a??b??c);return''});
+            let link='', title='', image='', text='';
+            for (const t of tokens){ if(t.startsWith('link='))link=t.slice(5); else if(t.startsWith('title='))title=t.slice(6); else if(t.startsWith('image='))image=t.slice(6); else if(t.startsWith('text='))text=t.slice(5); }
+            const isHttp = u=>/^https?:\/\//i.test(u);
+            const error = async msg => { await github.rest.issues.createComment({owner,repo,issue_number, body:`⚠️ ${msg}`}); core.setFailed(msg); };
+            if (link && image) return error('You cannot provide both a link and an image.');
+            if (link && !isHttp(link)) return error('Invalid link URL.');
+            if (image && !isHttp(image)) return error('Invalid image URL.');
+            if (text !== undefined && /^\s*$/.test(text)) return error('Custom text cannot be empty.');
+            core.setOutput('link_url', link); core.setOutput('link_title', title || 'View details'); core.setOutput('image_url', image); core.setOutput('text', text);
+
+      - name: Build message (template → text override → fallback) with conditionals
+        id: msg
+        env:
+          PR_TITLE: ${{ steps.pr.outputs.pr_title }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          REPO: ${{ steps.pr.outputs.repo_full }}
+          BASE_REF: ${{ steps.pr.outputs.base }}
+          MERGED_BY: ${{ steps.pr.outputs.merged_by }}
+          AUTHOR: ${{ steps.pr.outputs.author }}
+          REPO_URL: ${{ steps.pr.outputs.repo_url }}
+          COMMIT_SHA: ${{ steps.pr.outputs.merge_sha }}
+          COMMIT_SHA_SHORT: ${{ github.sha }}
+          LINK_URL: ${{ steps.args.outputs.link_url }}
+          LINK_TITLE: ${{ steps.args.outputs.link_title }}
+          IMAGE_URL: ${{ steps.args.outputs.image_url }}
+          TEXT_OVERRIDE: ${{ steps.args.outputs.text }}
+          IF_GROUP: ${{ hashFiles('.github/workflows/GROUP_MODE') }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TEXT_OVERRIDE" ]; then
+            printf '%s' "$TEXT_OVERRIDE" > message.txt
+          elif [ -f ".github/workflows/linkedin-post-template.md" ]; then
+            python3 - <<'PY' > message.txt
+import os, io, re
+p = ".github/workflows/linkedin-post-template.md"
+t = io.open(p, "r", encoding="utf-8").read()
+def render_conditionals(s, flags):
+    pattern = re.compile(r"{{#IF_([A-Z0-9_]+)}}(.*?){{/IF_\1}}", re.DOTALL)
+    def repl(m):
+        key = m.group(1)
+        return m.group(2) if flags.get(key, "").strip() else ""
+    return pattern.sub(repl, s)
+env_keys = ["PR_TITLE","PR_NUMBER","PR_URL","REPO","BASE_REF","MERGED_BY","AUTHOR","REPO_URL","COMMIT_SHA","COMMIT_SHA_SHORT","LINK_URL","LINK_TITLE","IMAGE_URL","IF_GROUP"]
+env = {k: os.environ.get(k,"") for k in env_keys}
+flags = {"LINK": env.get("LINK_URL",""), "IMAGE": env.get("IMAGE_URL",""), "GROUP": env.get("IF_GROUP","")}
+t = render_conditionals(t, flags)
+for k,v in env.items():
+    t = t.replace("{{%s}}"%k, v or "")
+io.open("message.txt","w",encoding="utf-8").write(t)
+PY
+          else
+            cat > message.txt <<'EOF'
+Merged PR #${{ env.PR_NUMBER }} into ${{ env.BASE_REF }} in ${{ env.REPO }}:
+${{ env.PR_TITLE }}
+
+Thanks @${{ env.MERGED_BY }}!
+${{ env.PR_URL }}
+EOF
+          fi
+          {
+            echo "message<<EOF"
+            cat message.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  post:
+    needs: gate
+    if: needs.gate.result == 'success' && needs.gate.outputs.command == '/publish' && hashFiles('.github/workflows/ignore.txt') == ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: linkedin-${{ github.repository }}
+      cancel-in-progress: true
+    environment:
+      name: linkedin
+    steps:
+      - name: Install tools
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+
+      # Mask secrets in logs
+      - name: Mask LinkedIn secrets in logs
+        run: |
+          echo "::add-mask::${{ secrets.LINKEDIN_ACCESS_TOKEN }}"
+          echo "::add-mask::${{ secrets.LINKEDIN_AUTHOR_URN }}"
+          if [ ! -z "${{ secrets.LINKEDIN_GROUP_URN }}" ]; then
+            echo "::add-mask::${{ secrets.LINKEDIN_GROUP_URN }}"
+          fi
+
+      - name: Post to LinkedIn (PUBLIC by default; group path optional)
+        env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
+          MSG: ${{ needs.gate.outputs.message }}
+          LINK_ARG: ${{ needs.gate.outputs.link_url }}
+          LINK_TITLE_ARG: ${{ needs.gate.outputs.link_title }}
+          IMAGE_ARG: ${{ needs.gate.outputs.image_url }}
+        run: |
+          set -euo pipefail
+          ATTACHMENT_MODE="none"; LINK_URL="${LINK_ARG:-}"; IMAGE_URL="${IMAGE_ARG:-}"
+          if [ -n "$IMAGE_URL" ]; then ATTACHMENT_MODE="image"; fi
+          if [ -n "$LINK_URL" ]; then ATTACHMENT_MODE="link"; fi
+
+          TEXT=$(python3 - <<'PY'
+import json, os
+print(json.dumps({"text": os.environ.get("MSG","")}))
+PY
+)
+
+          build_ugc_none(){ cat <<JSON
+{ "author":"${LINKEDIN_AUTHOR_URN}", "lifecycleState":"PUBLISHED",
+  "specificContent":{ "com.linkedin.ugc.ShareContent":{ "shareCommentary":$TEXT, "shareMediaCategory":"NONE" } },
+  "visibility":{ "com.linkedin.ugc.MemberNetworkVisibility":"PUBLIC" } }
+JSON
+}
+          build_ugc_link(){ cat <<JSON
+{ "author":"${LINKEDIN_AUTHOR_URN}", "lifecycleState":"PUBLISHED",
+  "specificContent":{ "com.linkedin.ugc.ShareContent":{ "shareCommentary":$TEXT, "shareMediaCategory":"ARTICLE",
+    "contentEntities":[{"entityLocation":"${LINK_URL}","thumbnails":[]}]} },
+  "visibility":{ "com.linkedin.ugc.MemberNetworkVisibility":"PUBLIC" } }
+JSON
+}
+
+          API_URL="https://api.linkedin.com/v2/ugcPosts"
+          case "$ATTACHMENT_MODE" in
+            none) PAYLOAD="$(build_ugc_none)";;
+            link) PAYLOAD="$(build_ugc_link)";;
+            image) echo "UGC image flow omitted in this sample." >&2; exit 1;;
+          esac
+
+          # Save payload for summary
+          echo "$PAYLOAD" > payload.json
+
+          # BEGIN_RETRY_BACKOFF
+          ATTEMPT=1
+          HTTP_CODE=0
+          while [ "$ATTEMPT" -le 3 ]; do
+            echo "Attempt $ATTEMPT ..."
+            HTTP_CODE=$(curl -sS -o response.json -w "%{http_code}" -X POST "$API_URL" \
+              -H "Authorization: Bearer ${LINKEDIN_ACCESS_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+            if [ "$HTTP_CODE" -eq 429 ] || [ "$HTTP_CODE" -ge 500 ]; then
+              S=$(( ATTEMPT * 5 ))
+              echo "Got HTTP $HTTP_CODE, backing off ${S}s..."
+              sleep "$S"
+              ATTEMPT=$(( ATTEMPT + 1 ))
+              continue
+            fi
+            break
+          done
+          # END_RETRY_BACKOFF
+
+          echo "$HTTP_CODE" > http_code.txt
+          echo "HTTP $HTTP_CODE"; head -n 60 response.json || true
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "LinkedIn API call failed." >&2
+            exit 1
+          fi
+
+      - name: Write GitHub Summary
+        if: always()
+        run: |
+          CODE="$(cat http_code.txt 2>/dev/null || echo unknown)"; STATUS_EMOJI="❌"; case "$CODE" in [2][0-9][0-9]) STATUS_EMOJI="✅";; esac
+          echo "# $STATUS_EMOJI LinkedIn Publish" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Timestamp:** $(date -u)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Run URL:** $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **PR / Commit URL:** $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Payload Preview (sanitized):**" >> "$GITHUB_STEP_SUMMARY"
+          (jq -r "." payload.json | sed -E "s/(\"authorization\": \"Bearer )[^\"]+/\1***REDACTED***/g" | head -n 60) >> "$GITHUB_STEP_SUMMARY" || echo "(payload.json not found)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Response Snippet:**" >> "$GITHUB_STEP_SUMMARY"
+          (jq -r "." response.json | head -n 60) >> "$GITHUB_STEP_SUMMARY" || echo "(response.json not found)" >> "$GITHUB_STEP_SUMMARY"

@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-
 name: Build Thermometer
 
 on:
-  workflow_dispatch: {}   # manual Run button
+  workflow_dispatch: {}
   push:
     paths:
       - "data/funds.json"
@@ -51,22 +50,15 @@ jobs:
         run: |
           set -e
           BUSTER="$(date -u +%Y%m%d%H%M%S)-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-
-          # Also bump logo cache-buster in index.html
-          sed -E -i "s|(src=\"assets/logo\\.svg)\\?v=[^\"]*|\\1?v=${BUSTER}|g" index.html || true
-          sed -E -i "s|src=\"assets/logo\\.svg\"|src=\"assets/logo.svg?v=${BUSTER}\"|g" index.html || true
-
-          # README.md (markdown)
-          # 1) Replace existing ?v=... if present
-          sed -E -i "s|(\\./thermometer\\.svg)\\?v=[^\\)]+|\\1?v=${BUSTER}|g" README.md || true
-          # 2) Add ?v=... if missing
-          sed -E -i "s|\\]\\(\\./thermometer\\.svg\\)|](./thermometer.svg?v=${BUSTER})|g" README.md || true
-
-          # index.html (html)
-          # 1) Replace existing ?v=... if present
-          sed -E -i "s|(src=\"thermometer\\.svg)\\?v=[^\"]*|\\1?v=${BUSTER}|g" index.html || true
-          # 2) Add ?v=... if missing
-          sed -E -i "s|src=\"thermometer\\.svg\"|src=\"thermometer.svg?v=${BUSTER}\"|g" index.html || true
+          # logo
+          sed -E -i "s|(src=\"assets/logo\.svg)\?v=[^\"]*|\1?v=${BUSTER}|g" index.html || true
+          sed -E -i "s|src=\"assets/logo\.svg\"|src=\"assets/logo.svg?v=${BUSTER}\"|g" index.html || true
+          # README.md
+          sed -E -i "s|(\./thermometer\.svg)\?v=[^\)]+|\1?v=${BUSTER}|g" README.md || true
+          sed -E -i "s|\]\(\./thermometer\.svg\)|](./thermometer.svg?v=${BUSTER})|g" README.md || true
+          # index thermometer
+          sed -E -i "s|(src=\"thermometer\.svg)\?v=[^\"]*|\1?v=${BUSTER}|g" index.html || true
+          sed -E -i "s|src=\"thermometer\.svg\"|src=\"thermometer.svg?v=${BUSTER}\"|g" index.html || true
 
       - name: Commit updated files (SVG + cache-busted references)
         uses: stefanzweifel/git-auto-commit-action@v5

@@ -1,0 +1,97 @@
+name: LinkedIn post preview on PR merge (template & placeholders)
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    if: ${{ hashFiles('.github/workflows/ignore.txt') == '' && github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build message from template (placeholders + conditionals)
+        id: msg
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO_URL: ${{ format('https://github.com/{0}', github.repository) }}
+          COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          COMMIT_SHA_SHORT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -f ".github/workflows/linkedin-post-template.md" ]; then
+            python3 - <<'PY' > message.txt
+import os, io, re
+p = ".github/workflows/linkedin-post-template.md"
+t = io.open(p, "r", encoding="utf-8").read()
+def render_conditionals(s, flags):
+    pattern = re.compile(r"{{#IF_([A-Z0-9_]+)}}(.*?){{/IF_\1}}", re.DOTALL)
+    def repl(m):
+        key = m.group(1); content = m.group(2)
+        return content if flags.get(key, "").strip() else ""
+    return pattern.sub(repl, s)
+env_keys = ["PR_TITLE","PR_NUMBER","PR_URL","REPO","BASE_REF","MERGED_BY","AUTHOR","REPO_URL","COMMIT_SHA","COMMIT_SHA_SHORT","LINK_URL","LINK_TITLE","IMAGE_URL","IF_GROUP"]
+env = {k: os.environ.get(k,"") for k in env_keys}
+flags = {"LINK": env.get("LINK_URL",""), "IMAGE": env.get("IMAGE_URL",""), "GROUP": env.get("IF_GROUP","")}
+t = render_conditionals(t, flags)
+for k,v in env.items():
+    t = t.replace("{{%s}}"%k, v or "")
+io.open("message.txt","w",encoding="utf-8").write(t)
+PY
+          else
+            cat > message.txt <<'EOF'
+Merged PR #${{ env.PR_NUMBER }} into ${{ env.BASE_REF }} in ${{ env.REPO }}:
+${{ env.PR_TITLE }}
+
+Thanks @${{ env.MERGED_BY }}!
+${{ env.PR_URL }}
+EOF
+          fi
+          {
+            echo "message<<EOF"
+            cat message.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment preview to PR (with command help)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const msg = fs.readFileSync('message.txt', 'utf8');
+            const help = [
+              '### ✅ How to publish this to LinkedIn',
+              '',
+              '**Approve via comment commands:**',
+              '',
+              '```',
+              '/publish',
+              '/publish text="Custom message here"',
+              '/publish link=https://example.com title="Optional custom title"',
+              '/publish image=https://example.com/hero.png',
+              '/publish text="Custom message" link=https://example.com',
+              '/dry-run text="Custom" link=https://example.com',
+              '/cancel',
+              '```'
+            ].join('\\n');
+            const body = ['🔎 **LinkedIn Draft Post**', '', '```', msg, '```', help].join('\\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body
+            });
